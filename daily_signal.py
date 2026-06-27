@@ -82,8 +82,11 @@ def run_open(T):
             if not skip: buys.append(r['nm'])
         print(f"  → 实际买入(各等额,开盘买、明日收盘卖,两份资金错开): {'、'.join(buys) if buys else '无'}")
         return len(s)>0
-    main=D[(D['qb']>3)&(D['qb']<20)&D['near']&D['trend']&D['brk']&(D['run20']<=0.8)&(D['amt']>=100000)&(D['gap']<0.098)]
-    if len(main)>0: show(main,'主选'); return
+    mainf=(D['qb']>3)&(D['qb']<20)&D['near']&D['trend']&(D['run20']<=0.8)&(D['amt']>=100000)&(D['gap']<0.098)
+    main_brk=D[mainf&D['brk']]   # 优先: 站上前高(刚突破/远超)
+    main_all=D[mainf]            # 退回: 选不出站上前高的就用现行主选
+    if len(main_brk)>0: print("  [站上前高·优先]");show(main_brk,'主选'); return
+    if len(main_all)>0: print("  [无票站上前高 → 退回现行主选]");show(main_all,'主选'); return
     fb1=D[(D['qb']<20)&D['near']&D['trend']&(D['run20']<=0.8)&(D['amt']>=100000)&(D['gap']<0.098)]
     fb2=D[(D['qb']<20)&D['near']&D['trend']&(D['amt']>=100000)&(D['gap']<0.098)]
     deep=D[(D['qb']<20)&(D['amt']>=100000)&(D['gap']<0.098)]
