@@ -63,12 +63,14 @@ def run_open(T):
         if not av or vol5<=0: continue
         qb=(av/100)/(vol5/240)
         h60=d['high'].iloc[i-60:i].max(); ctm1=d['close'].iloc[i-1]
+        prevhigh=d['high'].iloc[i-60:i-5].max()  # 6~60日前的前期高点(不含最近5日)
         ma20=d['close'].iloc[i-20:i].mean(); ma60=d['close'].iloc[i-60:i].mean()
         run20=d['close'].iloc[i-1]/d['close'].iloc[i-21]-1
         amt5=d['amount'].iloc[i-5:i].mean()/10  # 千元→万元? amount单位千元; /10万=亿. 用>=100000(千元)=1亿
         amt5b=d['amount'].iloc[i-5:i].mean()
         gap=d['open'].iloc[i]/d['close'].iloc[i-1]-1
         rows.append(dict(nm=nm,c=c,qb=qb,near=ctm1>=0.93*h60,trend=(ctm1>ma20)&(ma20>ma60),
+            brk=ctm1>=prevhigh,brkpct=ctm1/prevhigh*100-100,
             run20=run20,amt=amt5b,gap=gap,nearpct=ctm1/h60*100))
     D=pd.DataFrame(rows)
     def show(sel,tag):
@@ -80,7 +82,7 @@ def run_open(T):
             if not skip: buys.append(r['nm'])
         print(f"  → 实际买入(各等额,开盘买、明日收盘卖,两份资金错开): {'、'.join(buys) if buys else '无'}")
         return len(s)>0
-    main=D[(D['qb']>3)&(D['qb']<20)&D['near']&D['trend']&(D['run20']<=0.8)&(D['amt']>=100000)&(D['gap']<0.098)]
+    main=D[(D['qb']>3)&(D['qb']<20)&D['near']&D['trend']&D['brk']&(D['run20']<=0.8)&(D['amt']>=100000)&(D['gap']<0.098)]
     if len(main)>0: show(main,'主选'); return
     fb1=D[(D['qb']<20)&D['near']&D['trend']&(D['run20']<=0.8)&(D['amt']>=100000)&(D['gap']<0.098)]
     fb2=D[(D['qb']<20)&D['near']&D['trend']&(D['amt']>=100000)&(D['gap']<0.098)]
