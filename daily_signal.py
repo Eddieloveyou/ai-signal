@@ -72,12 +72,16 @@ def run_open(T):
             run20=run20,amt=amt5b,gap=gap,nearpct=ctm1/h60*100))
     D=pd.DataFrame(rows)
     def show(sel,tag):
-        s=sel.sort_values('qb',ascending=False)
+        s=sel.sort_values('qb',ascending=False);buys=[]
         for k,(_,r) in enumerate(s.head(3).iterrows(),1):
-            print(f"  No.{k} {r['nm']}({r['c']}) 量比{r['qb']:.2f} 开盘{r['gap']*100:+.1f}% 现价/60日高{r['nearpct']:.0f}% [{tag}]")
+            skip=(k>1)and(r['gap']<0)   # 低开(开盘<0)且非量比第1名 → 剔除不买
+            flag='✗剔除(低开非第1名)' if skip else '★买入'
+            print(f"  No.{k} {r['nm']}({r['c']}) 量比{r['qb']:.2f} 开盘{r['gap']*100:+.1f}% 现价/60日高{r['nearpct']:.0f}% [{flag}]")
+            if not skip: buys.append(r['nm'])
+        print(f"  → 实际买入(各等额,开盘买、明日收盘卖,两份资金错开): {'、'.join(buys) if buys else '无'}")
         return len(s)>0
     main=D[(D['qb']>3)&(D['qb']<20)&D['near']&D['trend']&(D['run20']<=0.8)&(D['amt']>=100000)&(D['gap']<0.098)]
-    if len(main)>0: show(main,'主选·前3名各1/3'); print("  → 开盘买入、明日收盘卖出,两份资金错开滚动"); return
+    if len(main)>0: show(main,'主选'); return
     fb1=D[(D['qb']<20)&D['near']&D['trend']&(D['run20']<=0.8)&(D['amt']>=100000)&(D['gap']<0.098)]
     fb2=D[(D['qb']<20)&D['near']&D['trend']&(D['amt']>=100000)&(D['gap']<0.098)]
     deep=D[(D['qb']<20)&(D['amt']>=100000)&(D['gap']<0.098)]
