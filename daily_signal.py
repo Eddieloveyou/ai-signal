@@ -68,7 +68,7 @@ def run_open(T):
         amt5=d['amount'].iloc[i-5:i].mean()/10  # 千元→万元? amount单位千元; /10万=亿. 用>=100000(千元)=1亿
         amt5b=d['amount'].iloc[i-5:i].mean()
         gap=d['open'].iloc[i]/d['close'].iloc[i-1]-1
-        rows.append(dict(nm=nm,c=c,qb=qb,near=ctm1>=0.95*h60,trend=(ctm1>ma20)&(ma20>ma60),
+        rows.append(dict(nm=nm,c=c,qb=qb,near=ctm1>=0.93*h60,trend=(ctm1>ma20)&(ma20>ma60),
             run20=run20,amt=amt5b,gap=gap,nearpct=ctm1/h60*100))
     D=pd.DataFrame(rows)
     def show(sel,tag):
@@ -76,9 +76,9 @@ def run_open(T):
         for k,(_,r) in enumerate(s.head(3).iterrows(),1):
             print(f"  No.{k} {r['nm']}({r['c']}) 量比{r['qb']:.2f} 开盘{r['gap']*100:+.1f}% 现价/60日高{r['nearpct']:.0f}% [{tag}]")
         return len(s)>0
-    main=D[(D['qb']>3)&(D['qb']<20)&D['near']&D['trend']&(D['run20']<=0.6)&(D['amt']>=100000)&(D['gap']<0.098)]
+    main=D[(D['qb']>3)&(D['qb']<20)&D['near']&D['trend']&(D['run20']<=0.8)&(D['amt']>=100000)&(D['gap']<0.098)]
     if len(main)>0: show(main,'主选·前3名各1/3'); print("  → 开盘买入、明日收盘卖出,两份资金错开滚动"); return
-    fb1=D[(D['qb']<20)&D['near']&D['trend']&(D['run20']<=0.6)&(D['amt']>=100000)&(D['gap']<0.098)]
+    fb1=D[(D['qb']<20)&D['near']&D['trend']&(D['run20']<=0.8)&(D['amt']>=100000)&(D['gap']<0.098)]
     fb2=D[(D['qb']<20)&D['near']&D['trend']&(D['amt']>=100000)&(D['gap']<0.098)]
     deep=D[(D['qb']<20)&(D['amt']>=100000)&(D['gap']<0.098)]
     for sel,tag in [(fb1,'兜底①放宽量比'),(fb2,'兜底②放宽前20涨幅'),(deep,'深兜底·真空仓·牛市专用·慎用·小仓位')]:
