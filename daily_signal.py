@@ -1,10 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AI双引擎·量比策略 每日信号. 用法: python3 daily_signal.py [open|close] [YYYYMMDD]
-依赖 tushare, token 从环境变量 TUSHARE_TOKEN 读取(或第3个参数)。"""
-import os, sys, numpy as np, pandas as pd, tushare as ts
+"""AI双引擎·量比策略 v2.1 — 每日早盘(9:25)信号 [并行加速 + 推送]
+用法: python3 daily_signal.py [YYYYMMDD]
+  token 读环境变量 TUSHARE_TOKEN。
+  推送(任选其一, 配了就推): TELEGRAM_BOT_TOKEN+TELEGRAM_CHAT_ID / WECOM_WEBHOOK(企业微信群机器人) / PUSHPLUS_TOKEN(微信)。
+输出: 只告诉当天买哪几只(进攻主选/兜底②/真空 或 空仓), 不输出收益率。
 
-POOL = {  # 60只AI主池
+规则v2.1: 60只AI主池等权指数(T-1)>MA20→进攻, 否则今日空仓(不防守/不买ETF)。
+进攻量比=(今日9:25竞价量/100)/(过去5日日均量/240)。
+主选: 量比∈(3,20)+T-1收盘≥60日高×93%+收盘>MA20>MA60+前20涨≤80%+近5日均额≥1亿+开盘<9.8% → 量比前3;
+  #2/#3若9:25开盘价收在竞价区间顶部20%(终值位置>80)则剔, 剩几只等额买。
+兜底②(主选空): 去掉量比>3下限&涨幅上限(留贴高+趋势) → 量比第1。
+真空仓(牛市深兜底,小仓位): 仅量比<20+近5日均额≥1亿+开盘<9.8% → 量比第1。
+T开盘买、T+1收盘卖, 两份资金错开。
+"""
+import os, sys, time, json, urllib.request, numpy as np, pandas as pd, tushare as ts
+from concurrent.futures import ThreadPoolExecutor
+
+POOL = {
  '风华高科':'000636.SZ','华工科技':'000988.SZ','德明利':'001309.SZ','大族激光':'002008.SZ','科大讯飞':'002230.SZ',
  '东山精密':'002384.SZ','双环传动':'002472.SZ','科士达':'002518.SZ','英维克':'002837.SZ','洁美科技':'002859.SZ',
  '深南电路':'002916.SZ','创世纪':'300083.SZ','拓尔思':'300229.SZ','中际旭创':'300308.SZ','润泽科技':'300442.SZ',
@@ -17,105 +30,108 @@ POOL = {  # 60只AI主池
  '中微公司':'688012.SH','绿的谐波':'688017.SH','拓荆科技':'688072.SH','步科股份':'688160.SH','生益电子':'688183.SH',
  '寒武纪':'688256.SH','联瑞新材':'688300.SH','汇成股份':'688403.SH','源杰科技':'688498.SH','佰维存储':'688525.SH',
  '华丰科技':'688629.SH','鼎通科技':'688668.SH','伟创电气':'688698.SH','普冉股份':'688766.SH','中控技术':'688777.SH'}
-N2T={v:k for k,v in POOL.items()}
-WHITE5={'商贸零售','社会服务','医药生物','电子','公用事业'}
 
-def api():
-    tok=os.environ.get('TUSHARE_TOKEN') or (sys.argv[3] if len(sys.argv)>3 else '')
-    ts.set_token(tok); return ts.pro_api()
-pro=api()
+if not os.environ.get('TUSHARE_TOKEN'): sys.exit('缺少 TUSHARE_TOKEN')
+ts.set_token(os.environ['TUSHARE_TOKEN']); pro = ts.pro_api()
 
-def last_trade_day(d):
-    cal=pro.trade_cal(exchange='SSE', end_date=d, start_date=str(int(d[:4])-1)+d[4:], is_open=1)
-    days=sorted(cal['cal_date']); return days[-1], days
+def _post(url, data, headers=None):
+    try:
+        req = urllib.request.Request(url, data=json.dumps(data).encode(), headers=headers or {'Content-Type': 'application/json'})
+        urllib.request.urlopen(req, timeout=15).read()
+    except Exception as e:
+        print('推送失败:', e)
 
-def daily_hist(code, end, n=130):
-    df=pro.daily(ts_code=code, end_date=end).sort_values('trade_date')
-    return df.tail(n).reset_index(drop=True)
+def notify(text):
+    bt, cid = os.environ.get('TELEGRAM_BOT_TOKEN'), os.environ.get('TELEGRAM_CHAT_ID')
+    if bt and cid:
+        _post(f'https://api.telegram.org/bot{bt}/sendMessage', {'chat_id': cid, 'text': text})
+    wecom = os.environ.get('WECOM_WEBHOOK')
+    if wecom:
+        _post(wecom, {'msgtype': 'text', 'text': {'content': text}})
+    lark = os.environ.get('LARK_WEBHOOK')   # 飞书自定义机器人
+    if lark:
+        _post(lark, {'msg_type': 'text', 'content': {'text': text}})
+    pp = os.environ.get('PUSHPLUS_TOKEN')
+    if pp:
+        _post('https://www.pushplus.plus/send', {'token': pp, 'title': 'AI量比信号', 'content': text})
 
-def pool_index_ma20(end):
-    closes={}
-    for c in POOL.values():
-        d=daily_hist(c,end,80)
-        if len(d)>=21: closes[c]=d.set_index('trade_date')['close']
-    df=pd.DataFrame(closes); reb=df/df.bfill().iloc[0]; idx=reb.mean(axis=1)
-    ma=idx.rolling(20).mean()
-    return idx, ma
+def one(c, T):
+    for a in range(3):
+        try:
+            d = pro.daily(ts_code=c, end_date=T)
+            if d is not None: return c, d.sort_values('trade_date').tail(70).reset_index(drop=True)
+        except Exception:
+            time.sleep(0.6 * (a + 1))
+    return c, None
 
-def run_open(T):
-    print(f"【今日进攻仓 9:25】{T}")
-    # 1. AI主池指数 vs MA20 (T-1判断)
-    idx,ma=pool_index_ma20(T)
-    dts=list(idx.index); tm1=dts[-2] if dts[-1]==T else dts[-1]
-    if idx.get(tm1) <= ma.get(tm1):
-        print(f"AI主池等权指数({idx.get(tm1):.4f}) ≤ MA20({ma.get(tm1):.4f}) → AI熄火,今日走防守(反弹见14:55)"); return
-    print(f"AI主池指数 > MA20 → 进攻")
-    # 2. 9:25集合竞价量比 + 筛选
-    auc=pro.stk_auction_o(trade_date=T)
-    avmap=dict(zip(auc['ts_code'],auc['vol']))
-    rows=[]
-    for nm,c in POOL.items():
-        d=daily_hist(c,T,130)
-        if T not in set(d['trade_date']) or len(d)<61: continue
-        i=d.index[d['trade_date']==T][0]
-        if i<60: continue
-        vol5=d['vol'].iloc[i-5:i].mean(); av=avmap.get(c)
-        if not av or vol5<=0: continue
-        qb=(av/100)/(vol5/240)
-        h60=d['high'].iloc[i-60:i].max(); ctm1=d['close'].iloc[i-1]
-        prevhigh=d['high'].iloc[i-60:i-5].max()  # 6~60日前的前期高点(不含最近5日)
-        ma20=d['close'].iloc[i-20:i].mean(); ma60=d['close'].iloc[i-60:i].mean()
-        run20=d['close'].iloc[i-1]/d['close'].iloc[i-21]-1
-        amt5=d['amount'].iloc[i-5:i].mean()/10  # 千元→万元? amount单位千元; /10万=亿. 用>=100000(千元)=1亿
-        amt5b=d['amount'].iloc[i-5:i].mean()
-        gap=d['open'].iloc[i]/d['close'].iloc[i-1]-1
-        rows.append(dict(nm=nm,c=c,qb=qb,near=ctm1>=0.93*h60,trend=(ctm1>ma20)&(ma20>ma60),
-            brk=ctm1>=prevhigh,brkpct=ctm1/prevhigh*100-100,
-            run20=run20,amt=amt5b,gap=gap,nearpct=ctm1/h60*100))
-    D=pd.DataFrame(rows)
-    def show(sel,tag):
-        s=sel.sort_values('qb',ascending=False);buys=[]
-        for k,(_,r) in enumerate(s.head(3).iterrows(),1):
-            skip=(k>1)and(r['gap']<0)   # 低开(开盘<0)且非量比第1名 → 剔除不买
-            flag='✗剔除(低开非第1名)' if skip else '★买入'
-            print(f"  No.{k} {r['nm']}({r['c']}) 量比{r['qb']:.2f} 开盘{r['gap']*100:+.1f}% 现价/60日高{r['nearpct']:.0f}% [{flag}]")
-            if not skip: buys.append(r['nm'])
-        print(f"  → 实际买入(各等额,开盘买、明日收盘卖,两份资金错开): {'、'.join(buys) if buys else '无'}")
-        return len(s)>0
-    mainf=(D['qb']>3)&(D['qb']<20)&D['near']&D['trend']&(D['run20']<=0.8)&(D['amt']>=100000)&(D['gap']<0.098)
-    main_brk=D[mainf&D['brk']]   # 优先: 站上前高(刚突破/远超)
-    main_all=D[mainf]            # 退回: 选不出站上前高的就用现行主选
-    if len(main_brk)>0: print("  [站上前高·优先]");show(main_brk,'主选'); return
-    if len(main_all)>0: print("  [无票站上前高 → 退回现行主选]");show(main_all,'主选'); return
-    fb1=D[(D['qb']<20)&D['near']&D['trend']&(D['run20']<=0.8)&(D['amt']>=100000)&(D['gap']<0.098)]
-    fb2=D[(D['qb']<20)&D['near']&D['trend']&(D['amt']>=100000)&(D['gap']<0.098)]
-    deep=D[(D['qb']<20)&(D['amt']>=100000)&(D['gap']<0.098)]
-    for sel,tag in [(fb1,'兜底①放宽量比'),(fb2,'兜底②放宽前20涨幅'),(deep,'深兜底·真空仓·牛市专用·慎用·小仓位')]:
-        if len(sel)>0:
-            r=sel.sort_values('qb',ascending=False).iloc[0]
-            print(f"  兜底1只: {r['nm']}({r['c']}) 量比{r['qb']:.2f} 开盘{r['gap']*100:+.1f}% [{tag}]")
-            print("  → 开盘买入、明日收盘卖出"); return
-    print("  今日无任何可买标的,空仓")
+def main(T):
+    t0 = time.time()
+    hist = {}
+    with ThreadPoolExecutor(max_workers=12) as ex:
+        for c, d in ex.map(lambda c: one(c, T), list(POOL.values())):
+            if d is not None and len(d): hist[c] = d
+    auc = None
+    for a in range(3):
+        try:
+            x = pro.stk_auction_o(trade_date=T)
+            if x is not None and len(x): auc = x.set_index('ts_code'); break
+        except Exception: time.sleep(0.8)
 
-def run_close(T):
-    print(f"【今日防守·超跌反弹 14:55】{T}")
-    idx,ma=pool_index_ma20(T)
-    dts=list(idx.index); tm1=dts[-2] if dts[-1]==T else dts[-1]
-    if idx.get(tm1) > ma.get(tm1):
-        print("AI主池指数 > MA20 → AI在场,今日是进攻日,防守不启用(进攻见9:25)"); return
-    print("AI主池跌破MA20 → AI熄火,进入防守")
-    # 中证1000开关
-    zz=pro.index_daily(ts_code='000852.SH', end_date=T).sort_values('trade_date').tail(25)
-    zc=zz['close'].iloc[-1]; zma=zz['close'].tail(20).mean(); zo=zz['open'].iloc[-1]
-    if not (zc>zma or zc>zo):
-        print(f"中证1000({zc:.0f}) 跌破MA20({zma:.0f}) 且收阴 → 今日不做反弹,资金停泊银行ETF 512800"); return
-    print(f"中证1000 站上MA20或收阳 → 做超跌反弹")
-    print("  [提示] 全市场超跌反弹选股需当日近收盘实时行情;tushare日线为EOD,建议用 ts.realtime_quote 对预筛候选取实时价后套用规则(本脚本预留接口)。")
-    print("  规则: 10cm主板 + 板块∈{商贸/社服/医药/电子/公用} + 当天收阳 + T当日跌≤3% + 强/中/兜底信号 + 买20日跌最深Top1; 尾盘买,明日开盘>0.3%卖否则明日尾盘卖。")
+    closes = {}
+    for c, d in hist.items():
+        dd = d[d['trade_date'] < T]
+        if len(dd) >= 21: closes[c] = dd.set_index('trade_date')['close']
+    cdf = pd.DataFrame(closes); idx = (cdf / cdf.bfill().iloc[0]).mean(axis=1); ma = idx.rolling(20).mean()
+    on = idx.iloc[-1] > ma.iloc[-1]
+    head = f"【{T} AI量比·早盘信号】指数{idx.iloc[-1]:.3f}{'>' if on else '≤'}MA20{ma.iloc[-1]:.3f}→{'进攻' if on else '熄火'}"
 
-if __name__=='__main__':
-    mode=sys.argv[1] if len(sys.argv)>1 else 'open'
-    T=sys.argv[2] if len(sys.argv)>2 else None
-    if not T:
-        import datetime; T,_=last_trade_day(pro.trade_cal(exchange='SSE',is_open=1,end_date='29991231').iloc[-1]['cal_date'] if False else __import__('time').strftime('%Y%m%d'))
-    (run_open if mode=='open' else run_close)(T)
+    if not on:
+        return head + "\n👉 今日空仓持币(不防守/不买ETF)"
+    if auc is None:
+        return head + "\n👉 9:25竞价数据暂未就绪, 请9:25后重跑"
+
+    rows = []
+    for nm, c in POOL.items():
+        d = hist.get(c)
+        if d is None: continue
+        dd = d[d['trade_date'] < T].reset_index(drop=True)
+        if len(dd) < 61 or c not in auc.index: continue
+        cl = dd['close'].values; hi = dd['high'].values; vo = dd['vol'].values; am = dd['amount'].values
+        a = auc.loc[c]; av, aop, ahi, alo = a['vol'], a['open'], a['high'], a['low']
+        v5 = vo[-5:].mean()
+        if not av or v5 <= 0 or not aop: continue
+        qb = (av / 100) / (v5 / 240)
+        ctm1 = cl[-1]; h60 = hi[-60:].max(); ma20 = cl[-20:].mean(); ma60 = cl[-60:].mean()
+        run20 = cl[-1] / cl[-21] - 1; amt5 = am[-5:].mean(); gap = aop / ctm1 - 1
+        rng = ahi - alo; spos = ((aop - alo) / rng * 100) if rng > 0 else np.nan
+        rows.append(dict(nm=nm, c=c, qb=qb, near=ctm1 >= 0.93 * h60, trend=(ctm1 > ma20) and (ma20 > ma60),
+                         run20=run20, amt5=amt5, gap=gap, spos=spos))
+    D = pd.DataFrame(rows)
+    base = (D['qb'] < 20) & (D['amt5'] >= 100000) & (D['gap'] < 0.098)
+    main_ = D[base & (D['qb'] > 3) & D['near'] & D['trend'] & (D['run20'] <= 0.8)]
+    fb2 = D[base & D['near'] & D['trend']]
+    deep = D[base]
+
+    if len(main_) > 0:
+        s = main_.sort_values('qb', ascending=False).head(3).reset_index(drop=True)
+        buys, skip = [], []
+        for k, r in s.iterrows():
+            if (k >= 1) and pd.notna(r['spos']) and (r['spos'] > 80): skip.append(r['nm'])
+            else: buys.append(f"{r['nm']}(量比{r['qb']:.1f})")
+        msg = f"👉 今日买入【主选·各1/{len(buys) if buys else 1}仓】: {'、'.join(buys) if buys else '无'}"
+        if skip: msg += f"\n  (剔抢顶: {'、'.join(skip)})"
+    elif len(fb2) > 0:
+        r = fb2.sort_values('qb', ascending=False).iloc[0]
+        msg = f"👉 今日买入【兜底②·满仓1只】: {r['nm']}(量比{r['qb']:.1f})"
+    elif len(deep) > 0:
+        r = deep.sort_values('qb', ascending=False).iloc[0]
+        msg = f"👉 今日买入【真空仓·牛市小仓位】: {r['nm']}(量比{r['qb']:.1f})"
+    else:
+        msg = "👉 今日无合格标的 → 空仓"
+    return head + "\n" + msg + f"\n(T开盘买/T+1收盘卖, 两份资金错开; 耗时{time.time()-t0:.1f}s)"
+
+if __name__ == '__main__':
+    T = sys.argv[1] if (len(sys.argv) > 1 and sys.argv[1][:8].isdigit()) else time.strftime('%Y%m%d')
+    out = main(T)
+    print(out)
+    notify(out)
