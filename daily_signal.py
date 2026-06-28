@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AI主池·集合竞价量比 日内策略 v2.4 — 每日早盘(9:25)信号 [并行加速 + 推送]
+"""AI主池·集合竞价量比 日内策略 v2.5 — 每日早盘(9:25)信号 [并行加速 + 推送]
 用法: python3 daily_signal.py [YYYYMMDD]
   token 读环境变量 TUSHARE_TOKEN。
   推送(任选其一, 配了就推): TELEGRAM_BOT_TOKEN+TELEGRAM_CHAT_ID / WECOM_WEBHOOK / LARK_WEBHOOK / PUSHPLUS_TOKEN。
 输出: 只告诉当天买哪几只(主选一/二/三 或 兜底 / 深兜底, 或熄火日空仓), 不输出收益率。
 
+═══ 规则 v2.5 (相对 v2.4: 量比带 (3,20)→(6,12), 采纳干净窗口回测推荐口径) ═══
+【量比带收紧 (6,12)】候选下限 3→6、(硬)上限 20→12(硬上限=带上限); 兜底沿用硬上限<12;
+   深兜底带改 量比∈(5,12)+20日涨幅≤100。依据: 干净窗口(stk_auction 9:25 真值, 仅2025-01-16起有史)
+   逐日回测, (6,12)选1/2/3 全程 126.2×/回撤-15.0%/按笔(逐只)胜率66%/盈亏比3.78, 优于(3,18)基准79×。
+   注: 上限12经前后两段样本外检验稳健(切掉量比爆表后高开回落的票); 下限6含样本内拟合, 取6不再上调。
 ═══ 规则 v2.4 (相对 v2.3 的两处实证修正) ═══
 【数据·根除未来函数】量比与开盘价一律用 `stk_auction`(纯9:25撮合: vol股 / price撮合价),
    不用 `stk_auction_o`(它混入9:30开盘后成交=未来函数, 会把量比虚高、把次级票误抬进主选)。
@@ -18,14 +23,14 @@
   择时: 60只AI主池等权指数 T-1收盘 > MA20 → 进攻; ≤ MA20(熄火) → 防守=空仓(持现金)。
         银行ETF(512800)/黄金ETF(518880) 仅作参考对比, 不实际持有。
   量比 = (今日9:25撮合量股/100) ÷ (过去5日日均量手/240)。
-  候选基础筛选: 量比∈(3,20) + T-1收盘≥60日高×93%(贴高) + 多头(收盘>MA20>MA60)
+  候选基础筛选: 量比∈(6,12) + T-1收盘≥60日高×93%(贴高) + 多头(收盘>MA20>MA60)
               + 近5日均成交额≥1亿 + 开盘涨幅<9.8% + 非ST。  开盘价=撮合价。
   主选一: 候选中剔「20日涨幅>100%」后, 量比第1 —— 低开照买(#1龙头低开是优质买点)。
   主选二/三: 量比次高(剔「20日涨幅>80%」)的自然 #2/#3 两格, 各自仅当 gap≥LOW_OPEN_TOL 才保留;
             低开超阈值则该格留空、不向下替补(替补会买到低量比杂票, 回测更差)。
   → 有几只算几只(1~3只), 均分仓位。
-  兜底(主选0只): 去掉量比∈(3,20)与20日涨幅限制; 留 贴高+多头+额≥1亿+开盘<9.8%+非ST → 量比第1, 满仓1只。
-  深兜底(主选+兜底0只): 仅 额≥1亿+开盘<9.8%+非ST+量比<20 → 量比第1, 满仓1只。
+  兜底(主选0只): 去掉量比下限6与20日80软线; 仍受硬上限量比<12与20日≤100; 留 贴高+多头+额≥1亿+开盘<9.8%+非ST → 量比第1, 满仓1只。
+  深兜底(主选+兜底0只): 量比∈(5,12)+20日≤100+额≥1亿+开盘<9.8%+非ST → 量比第1, 满仓1只。
   执行: T开盘买、T+1收盘卖, 两份资金错开一天。
 """
 import os, sys, time, json, urllib.request, numpy as np, pandas as pd, tushare as ts
@@ -111,7 +116,7 @@ def main(T):
         if len(dd) >= 21: closes[c] = dd.set_index('trade_date')['close']
     cdf = pd.DataFrame(closes); idx = (cdf / cdf.bfill().iloc[0]).mean(axis=1); ma = idx.rolling(20).mean()
     on = idx.iloc[-1] > ma.iloc[-1]
-    head = f"【{T} AI量比·早盘信号 v2.4】等权指数{idx.iloc[-1]:.3f}{'>' if on else '≤'}MA20{ma.iloc[-1]:.3f}→{'进攻(在场)' if on else '熄火(防守)'}"
+    head = f"【{T} AI量比·早盘信号 v2.5】等权指数{idx.iloc[-1]:.3f}{'>' if on else '≤'}MA20{ma.iloc[-1]:.3f}→{'进攻(在场)' if on else '熄火(防守)'}"
 
     if not on:
         return head + "\n👉 今日防守(熄火)= 空仓(持现金, 当日策略收益0)" \
@@ -137,8 +142,8 @@ def main(T):
                          run20=run20, amt5=amt5, gap=gap, isST=(c in st)))
     D = pd.DataFrame(rows)
 
-    # 候选基础筛选: 量比∈(3,20)+贴高+多头+额≥1亿+开盘<9.8%+非ST
-    base = (D['qb'] > 3) & (D['qb'] < 20) & D['near'] & D['trend'] & (D['amt5'] >= 100000) & (D['gap'] < 0.098) & (~D['isST'])
+    # 候选基础筛选: 量比∈(6,12)+贴高+多头+额≥1亿+开盘<9.8%+非ST  (v2.5 带收紧)
+    base = (D['qb'] > 6) & (D['qb'] < 12) & D['near'] & D['trend'] & (D['amt5'] >= 100000) & (D['gap'] < 0.098) & (~D['isST'])
     cand = D[base].sort_values('qb', ascending=False).reset_index(drop=True)
 
     picks = []
@@ -167,12 +172,12 @@ def main(T):
                     dropped.append(f"{r['nm']}(低开{r['gap']*100:.1f}%)")
         if dropped: msg += f"\n  (剔低开>{abs(LOW_OPEN_TOL)*100:.1f}%的次级: {'、'.join(dropped)} → 该格留空不替补)"
     else:
-        fb = D[(D['qb'] < 20) & D['near'] & D['trend'] & (D['amt5'] >= 100000) & (D['gap'] < 0.098) & (~D['isST'])]
+        fb = D[(D['qb'] < 12) & D['near'] & D['trend'] & (D['amt5'] >= 100000) & (D['gap'] < 0.098) & (~D['isST']) & (D['run20'] <= 1.0)]
         if len(fb):
             r = fb.sort_values('qb', ascending=False).iloc[0]
             msg = f"👉 今日买入【兜底·满仓1只】: {r['nm']}(量比{r['qb']:.1f})"
         else:
-            deep = D[(D['amt5'] >= 100000) & (D['gap'] < 0.098) & (~D['isST']) & (D['qb'] < 20)]
+            deep = D[(D['amt5'] >= 100000) & (D['gap'] < 0.098) & (~D['isST']) & (D['qb'] > 5) & (D['qb'] < 12) & (D['run20'] <= 1.0)]
             if len(deep):
                 r = deep.sort_values('qb', ascending=False).iloc[0]
                 msg = f"👉 今日买入【深兜底·满仓1只】: {r['nm']}(量比{r['qb']:.1f})"
