@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AI双引擎·量比策略 v2.1 — 每日早盘(9:25)信号 [并行加速 + 推送]
+"""AI双引擎·量比策略 v2.2 — 每日早盘(9:25)信号 [并行加速 + 推送]
 用法: python3 daily_signal.py [YYYYMMDD]
   token 读环境变量 TUSHARE_TOKEN。
   推送(任选其一, 配了就推): TELEGRAM_BOT_TOKEN+TELEGRAM_CHAT_ID / WECOM_WEBHOOK(企业微信群机器人) / PUSHPLUS_TOKEN(微信)。
-输出: 只告诉当天买哪几只(进攻主选/兜底②/真空 或 空仓), 不输出收益率。
+输出: 只告诉当天买哪几只(进攻主选/兜底/真空 或 熄火日停泊ETF), 不输出收益率。
 
-规则v2.1: 60只AI主池等权指数(T-1)>MA20→进攻, 否则今日空仓(不防守/不买ETF)。
+规则v2.2: 60只AI主池等权指数(T-1)>MA20→进攻, 否则熄火日停泊银行ETF(512800)/黄金ETF(518880)。
 进攻量比=(今日9:25竞价量/100)/(过去5日日均量/240)。
 主选: 量比∈(3,20)+T-1收盘≥60日高×93%+收盘>MA20>MA60+前20涨≤80%+近5日均额≥1亿+开盘<9.8% → 量比前3;
   #2/#3若9:25开盘价收在竞价区间顶部20%(终值位置>80)则剔, 剩几只等额买。
@@ -86,7 +86,8 @@ def main(T):
     head = f"【{T} AI量比·早盘信号】指数{idx.iloc[-1]:.3f}{'>' if on else '≤'}MA20{ma.iloc[-1]:.3f}→{'进攻' if on else '熄火'}"
 
     if not on:
-        return head + "\n👉 今日空仓持币(不防守/不买ETF)"
+        return head + "\n👉 今日防守(熄火): 停泊 银行ETF(512800) 或 黄金ETF(518880)" \
+                      "\n(熄火日不做进攻; ETF停泊收益仅作参考, 回测中若低于进攻主收益则不停泊)"
     if auc is None:
         return head + "\n👉 9:25竞价数据暂未就绪, 请9:25后重跑"
 
@@ -122,7 +123,7 @@ def main(T):
         if skip: msg += f"\n  (剔抢顶: {'、'.join(skip)})"
     elif len(fb2) > 0:
         r = fb2.sort_values('qb', ascending=False).iloc[0]
-        msg = f"👉 今日买入【兜底②·满仓1只】: {r['nm']}(量比{r['qb']:.1f})"
+        msg = f"👉 今日买入【兜底·满仓1只】: {r['nm']}(量比{r['qb']:.1f})"
     elif len(deep) > 0:
         r = deep.sort_values('qb', ascending=False).iloc[0]
         msg = f"👉 今日买入【真空仓·牛市小仓位】: {r['nm']}(量比{r['qb']:.1f})"
