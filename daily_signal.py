@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AI双引擎·量比策略 v2.2 — 每日早盘(9:25)信号 [并行加速 + 推送]
+"""AI主池·集合竞价量比 日内策略 v2.3 — 每日早盘(9:25)信号 [并行加速 + 推送]
 用法: python3 daily_signal.py [YYYYMMDD]
   token 读环境变量 TUSHARE_TOKEN。
-  推送(任选其一, 配了就推): TELEGRAM_BOT_TOKEN+TELEGRAM_CHAT_ID / WECOM_WEBHOOK(企业微信群机器人) / PUSHPLUS_TOKEN(微信)。
-输出: 只告诉当天买哪几只(进攻主选/兜底/真空 或 熄火日停泊ETF), 不输出收益率。
+  推送(任选其一, 配了就推): TELEGRAM_BOT_TOKEN+TELEGRAM_CHAT_ID / WECOM_WEBHOOK / LARK_WEBHOOK / PUSHPLUS_TOKEN。
+输出: 只告诉当天买哪几只(主选一/二/三 或 兜底 / 深兜底, 或熄火日空仓), 不输出收益率。
 
-规则v2.2: 60只AI主池等权指数(T-1)>MA20→进攻, 否则熄火日停泊银行ETF(512800)/黄金ETF(518880)。
-进攻量比=(今日9:25竞价量/100)/(过去5日日均量/240)。
-主选: 量比∈(3,20)+T-1收盘≥60日高×93%+收盘>MA20>MA60+前20涨≤80%+近5日均额≥1亿+开盘<9.8% → 量比前3;
-  #2/#3若9:25开盘价收在竞价区间顶部20%(终值位置>80)则剔, 剩几只等额买。
-兜底②(主选空): 去掉量比>3下限&涨幅上限(留贴高+趋势) → 量比第1。
-真空仓(牛市深兜底,小仓位): 仅量比<20+近5日均额≥1亿+开盘<9.8% → 量比第1。
-T开盘买、T+1收盘卖, 两份资金错开。
+规则 v2.3:
+  择时: 60只AI主池等权指数 T-1收盘 > MA20 → 进攻; ≤ MA20(熄火) → 防守=空仓(持现金)。
+        银行ETF(512800)/黄金ETF(518880) 仅作参考对比, 不实际持有。
+  量比 = (今日9:25竞价量/100) ÷ (过去5日日均量/240)。
+  候选基础筛选: 量比∈(3,20) + T-1收盘≥60日高×93%(贴高) + 多头排列(收盘>MA20>MA60)
+              + 近5日均成交额≥1亿 + 开盘涨幅<9.8% + 非ST。
+  主选一: 在候选中剔除「20日涨幅>100%」后, 取量比第1。
+  主选二: 在主选一之外, 剔除「20日涨幅>80%」且剔除「终值位置>80%」后, 取量比第1。
+  主选三: 在主选一二之外, 剔除「20日涨幅>80%」且剔除「终值位置>80%」后, 取量比第1。
+  → 有几只算几只(1~3只), 均分仓位。
+  兜底(主选0只): 去掉量比∈(3,20)与20日涨幅限制; 留 贴高+多头+额≥1亿+开盘<9.8%+非ST → 量比第1, 满仓1只。
+  深兜底(主选+兜底0只): 仅 额≥1亿+开盘<9.8%+非ST+量比<20 → 量比第1, 满仓1只。
+  执行: T开盘买、T+1收盘卖, 两份资金错开一天。
+  终值位置 = (竞价最终价 − 竞价区间低) ÷ (竞价区间高 − 竞价区间低) × 100; 无区间(单一价)者不剔。
 """
 import os, sys, time, json, urllib.request, numpy as np, pandas as pd, tushare as ts
 from concurrent.futures import ThreadPoolExecutor
@@ -59,10 +66,17 @@ def one(c, T):
     for a in range(3):
         try:
             d = pro.daily(ts_code=c, end_date=T)
-            if d is not None: return c, d.sort_values('trade_date').tail(70).reset_index(drop=True)
+            if d is not None: return c, d.sort_values('trade_date').tail(80).reset_index(drop=True)
         except Exception:
             time.sleep(0.6 * (a + 1))
     return c, None
+
+def st_codes():
+    try:
+        b = pro.stock_basic(fields=['ts_code', 'name'])
+        return set(b[b['name'].str.contains('ST', na=False)]['ts_code'])
+    except Exception:
+        return set()
 
 def main(T):
     t0 = time.time()
@@ -70,6 +84,7 @@ def main(T):
     with ThreadPoolExecutor(max_workers=12) as ex:
         for c, d in ex.map(lambda c: one(c, T), list(POOL.values())):
             if d is not None and len(d): hist[c] = d
+    st = st_codes()
     auc = None
     for a in range(3):
         try:
@@ -77,17 +92,18 @@ def main(T):
             if x is not None and len(x): auc = x.set_index('ts_code'); break
         except Exception: time.sleep(0.8)
 
+    # 择时: 等权指数(T-1收盘) vs MA20
     closes = {}
     for c, d in hist.items():
         dd = d[d['trade_date'] < T]
         if len(dd) >= 21: closes[c] = dd.set_index('trade_date')['close']
     cdf = pd.DataFrame(closes); idx = (cdf / cdf.bfill().iloc[0]).mean(axis=1); ma = idx.rolling(20).mean()
     on = idx.iloc[-1] > ma.iloc[-1]
-    head = f"【{T} AI量比·早盘信号】指数{idx.iloc[-1]:.3f}{'>' if on else '≤'}MA20{ma.iloc[-1]:.3f}→{'进攻' if on else '熄火'}"
+    head = f"【{T} AI量比·早盘信号】等权指数{idx.iloc[-1]:.3f}{'>' if on else '≤'}MA20{ma.iloc[-1]:.3f}→{'进攻(在场)' if on else '熄火(防守)'}"
 
     if not on:
-        return head + "\n👉 今日防守(熄火): 停泊 银行ETF(512800) 或 黄金ETF(518880)" \
-                      "\n(熄火日不做进攻; ETF停泊收益仅作参考数据)"
+        return head + "\n👉 今日防守(熄火)= 空仓(持现金, 当日策略收益0)" \
+                      "\n(银行ETF 512800 / 黄金ETF 518880 仅作参考对比, 不实际持有)"
     if auc is None:
         return head + "\n👉 9:25竞价数据暂未就绪, 请9:25后重跑"
 
@@ -106,29 +122,41 @@ def main(T):
         run20 = cl[-1] / cl[-21] - 1; amt5 = am[-5:].mean(); gap = aop / ctm1 - 1
         rng = ahi - alo; spos = ((aop - alo) / rng * 100) if rng > 0 else np.nan
         rows.append(dict(nm=nm, c=c, qb=qb, near=ctm1 >= 0.93 * h60, trend=(ctm1 > ma20) and (ma20 > ma60),
-                         run20=run20, amt5=amt5, gap=gap, spos=spos))
+                         run20=run20, amt5=amt5, gap=gap, spos=spos, isST=(c in st)))
     D = pd.DataFrame(rows)
-    base = (D['qb'] < 20) & (D['amt5'] >= 100000) & (D['gap'] < 0.098)
-    main_ = D[base & (D['qb'] > 3) & D['near'] & D['trend'] & (D['run20'] <= 0.8)]
-    fb2 = D[base & D['near'] & D['trend']]
-    deep = D[base]
 
-    if len(main_) > 0:
-        s = main_.sort_values('qb', ascending=False).head(3).reset_index(drop=True)
-        buys, skip = [], []
-        for k, r in s.iterrows():
-            if (k >= 1) and pd.notna(r['spos']) and (r['spos'] > 80): skip.append(r['nm'])
-            else: buys.append(f"{r['nm']}(量比{r['qb']:.1f})")
-        msg = f"👉 今日买入【主选·各1/{len(buys) if buys else 1}仓】: {'、'.join(buys) if buys else '无'}"
-        if skip: msg += f"\n  (剔抢顶: {'、'.join(skip)})"
-    elif len(fb2) > 0:
-        r = fb2.sort_values('qb', ascending=False).iloc[0]
-        msg = f"👉 今日买入【兜底·满仓1只】: {r['nm']}(量比{r['qb']:.1f})"
-    elif len(deep) > 0:
-        r = deep.sort_values('qb', ascending=False).iloc[0]
-        msg = f"👉 今日买入【真空仓·牛市小仓位】: {r['nm']}(量比{r['qb']:.1f})"
+    # 候选基础筛选: 量比∈(3,20)+贴高+多头+额≥1亿+开盘<9.8%+非ST
+    base = (D['qb'] > 3) & (D['qb'] < 20) & D['near'] & D['trend'] & (D['amt5'] >= 100000) & (D['gap'] < 0.098) & (~D['isST'])
+    cand = D[base].sort_values('qb', ascending=False).reset_index(drop=True)
+
+    picks, chosen = [], set()
+    if len(cand):
+        # 主选一: 剔20日涨幅>100%, 量比第1
+        p1 = cand[(~cand['c'].isin(chosen)) & (cand['run20'] <= 1.0)]
+        if len(p1):
+            r = p1.iloc[0]; picks.append(('主选一', r)); chosen.add(r['c'])
+        # 主选二、三: 剔20日涨幅>80% 且 终值位置>80%, 量比第1 (依次)
+        for lab in ['主选二', '主选三']:
+            p = cand[(~cand['c'].isin(chosen)) & (cand['run20'] <= 0.8) & ~(cand['spos'] > 80)]
+            if len(p):
+                r = p.iloc[0]; picks.append((lab, r)); chosen.add(r['c'])
+
+    if picks:
+        n = len(picks)
+        items = [f"{r['nm']}(量比{r['qb']:.1f})" for _, r in picks]
+        msg = f"👉 今日买入【主选·各1/{n}仓】: {'、'.join(items)}"
     else:
-        msg = "👉 今日无合格标的 → 空仓"
+        fb = D[(D['qb'] < 20) & D['near'] & D['trend'] & (D['amt5'] >= 100000) & (D['gap'] < 0.098) & (~D['isST'])]
+        if len(fb):
+            r = fb.sort_values('qb', ascending=False).iloc[0]
+            msg = f"👉 今日买入【兜底·满仓1只】: {r['nm']}(量比{r['qb']:.1f})"
+        else:
+            deep = D[(D['amt5'] >= 100000) & (D['gap'] < 0.098) & (~D['isST']) & (D['qb'] < 20)]
+            if len(deep):
+                r = deep.sort_values('qb', ascending=False).iloc[0]
+                msg = f"👉 今日买入【深兜底·满仓1只】: {r['nm']}(量比{r['qb']:.1f})"
+            else:
+                msg = "👉 今日无合格标的 → 空仓"
     return head + "\n" + msg + f"\n(T开盘买/T+1收盘卖, 两份资金错开; 耗时{time.time()-t0:.1f}s)"
 
 if __name__ == '__main__':
