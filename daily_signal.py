@@ -114,12 +114,14 @@ def main(T):
         dd = d[d['trade_date'] < T].reset_index(drop=True)
         if len(dd) < 61 or c not in auc.index: continue
         cl = dd['close'].values; hi = dd['high'].values; vo = dd['vol'].values; am = dd['amount'].values
+        # 集合竞价五项(stk_auction_o): aop=open=竞价最终价=当日开盘价; ahi=high=区间高; alo=low=区间低
         a = auc.loc[c]; av, aop, ahi, alo = a['vol'], a['open'], a['high'], a['low']
         v5 = vo[-5:].mean()
         if not av or v5 <= 0 or not aop: continue
         qb = (av / 100) / (v5 / 240)
         ctm1 = cl[-1]; h60 = hi[-60:].max(); ma20 = cl[-20:].mean(); ma60 = cl[-60:].mean()
         run20 = cl[-1] / cl[-21] - 1; amt5 = am[-5:].mean(); gap = aop / ctm1 - 1
+        # 终值位置 = (竞价最终价 − 区间低)/(区间高 − 区间低)×100; high=low(单一价)→不剔
         rng = ahi - alo; spos = ((aop - alo) / rng * 100) if rng > 0 else np.nan
         rows.append(dict(nm=nm, c=c, qb=qb, near=ctm1 >= 0.93 * h60, trend=(ctm1 > ma20) and (ma20 > ma60),
                          run20=run20, amt5=amt5, gap=gap, spos=spos, isST=(c in st)))
