@@ -1,0 +1,74 @@
+{
+  "_说明": "小红书/财富号/淘股吧博主每日发布的『暗盘资金』榜单收集结果。『暗盘资金』是同花顺L2的算法指标(主力大单拆小单的隐蔽净买入估算), A股无官方暗盘, 与港股IPO暗盘无关。数据由网络搜索摘要收集, 只覆盖能检索到的交易日, 金额单位:亿元。next_day_* 字段为搜索得到的次日行情, verified=false 表示需用 dark_pool_analysis.py + Tushare 本地核实。",
+  "_收集时间": "2026-08-07",
+  "records": [
+    {
+      "date": "20260701",
+      "top1": "太极实业", "ts_code": "600667.SH", "dark_inflow_yi": 14.11,
+      "day_note": "当日涨停(妖股); 榜单前三: 太极实业14.11/京东方A13.52/东方财富10.55",
+      "next_day_pct": -10.0, "next_day_note": "7/2 一字跌停, 阴线", "verified": false,
+      "source": "caifuhao 暗盘流入资金TOP10 7/1; stockstar 7/2 跌停快报"
+    },
+    {
+      "date": "20260706",
+      "top1": "紫光股份", "ts_code": "000938.SZ", "dark_inflow_yi": 12.64,
+      "day_note": "当日涨停, 暗盘成交占比>12%; 榜单: 埃斯顿8.09/海南海药3.29(明流出暗流入)",
+      "next_day_pct": -5.49, "next_day_note": "7/7 收31.48元 -5.49%, 阴线", "verified": false,
+      "source": "sina 暗盘资金流向TOP10复盘(7/6); stockstar 7/7"
+    },
+    {
+      "date": "20260707",
+      "top1": "东山精密", "ts_code": "002384.SZ", "dark_inflow_yi": 11.59,
+      "day_note": "+5.53%; 明盘第一为华天科技(明35.25/暗9.36, 涨停+9.98%, 次日7/8 -1.64%阴线)",
+      "next_day_pct": null, "next_day_note": "7/8 未取到可靠数据(搜索命中2025年同日数据已剔除); 7/9 涨停261.32元", "verified": false,
+      "source": "caifuhao 2026-07-07 暗盘资金榜(非科创板双流入)"
+    },
+    {
+      "date": "20260709",
+      "top1": "京东方A", "ts_code": "000725.SZ", "dark_inflow_yi": 20.0,
+      "day_note": "『明卖暗买, 暗盘20亿冲第一』, 前十暗盘流入均超10亿",
+      "next_day_pct": -6.87, "next_day_note": "7/10 收7.59元 -6.87%, 阴线", "verified": false,
+      "source": "caifuhao 暗盘资金流入TOP10 7/9; cngold 7/10"
+    },
+    {
+      "date": "20260710",
+      "top1": "浪潮信息", "ts_code": "000977.SZ", "dark_inflow_yi": 7.97,
+      "day_note": "午间榜, 当日+8.93%; 中兴通讯7.92/蓝色光标7.40/中科曙光7.35/紫光股份7.08",
+      "next_day_pct": -4.5, "next_day_note": "7/13 收85.49元 -4.5%, 阴线", "verified": false,
+      "source": "sina 午间暗盘汇总 7/10; sohu 7/13 快报"
+    },
+    {
+      "date": "20260713",
+      "top1": "紫光股份", "ts_code": "000938.SZ", "dark_inflow_yi": 6.99,
+      "day_note": "淘股吧全天TOP100第一; 午间榜第一为中国卫星7.13亿(+7.84%, 次日7/14跌停-10%)",
+      "next_day_pct": -3.7, "next_day_note": "7/14 收36.98元 -3.70%, 盘中触跌停, 阴线", "verified": false,
+      "source": "tgb 7/13 暗盘资金流入TOP100; sina 7/14 跌停分析"
+    },
+    {
+      "date": "20260715",
+      "top1": "埃斯顿", "ts_code": "002747.SZ", "dark_inflow_yi": 4.14,
+      "day_note": "暗盘净流入前20第一, 当日+6.51%; 常山药业3.69/中国中免3.52; 医药/机器人低位日",
+      "next_day_pct": 3.8, "next_day_note": "7/16 约+3.8%(由7/17收38.19元-9.99%反推≈42.4元), 疑似阳线, 精度低", "verified": false,
+      "source": "sina 暗盘资金净流入前20(7/15); sohu 7/17"
+    },
+    {
+      "date": "20260730",
+      "top1": "德明利", "ts_code": "001309.SZ", "dark_inflow_yi": 14.54,
+      "day_note": "存储错杀抄底, 全场第一; 永鼎股份14.01; 高位光模块(中际旭创-36.1亿)遭抛售",
+      "next_day_pct": -1.06, "next_day_note": "7/31 收385.9元 -1.06%, 盘中触涨停390.04后炸板尾盘翻绿, 阴线", "verified": false,
+      "source": "sina 暗盘资金TOP10复盘(7/30); sina/龙虎榜 7/31"
+    }
+  ],
+  "additional_samples": [
+    {
+      "date": "20260707", "stock": "华天科技", "ts_code": "002185.SZ",
+      "role": "当日明盘第一(35.25亿)+暗盘9.36亿, 涨停+9.98%",
+      "next_day_pct": -1.64, "next_day_note": "7/8 收21.57元 -1.64%, 阴线"
+    },
+    {
+      "date": "20260713", "stock": "中国卫星", "ts_code": "600118.SH",
+      "role": "午间暗盘榜第一 7.13亿, 当日+7.84%",
+      "next_day_pct": -10.0, "next_day_note": "7/14 跌停 -10%, 后连续跌停"
+    }
+  ]
+}
