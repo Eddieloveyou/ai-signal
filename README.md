@@ -31,3 +31,18 @@ python3 daily_signal.py            # 取今天; 9:25后运行出当日买入
 python3 daily_signal.py 20260626   # 指定日期(回看/测试)
 ```
 仅输出当天买入标的，不输出收益率。详见 strategy_spec.txt。
+
+## 附加分析：暗盘(主力)资金流出榜 × 次日阳线概率
+小红书上流传的"暗盘资金流出榜"是行情软件的私有拆单指标(识别主力拆大单隐蔽出货)，无公开
+数据可精确复现；公开数据最接近的代理是**主力净流出 =(大单+超大单)卖出额−买入额**
+(Tushare `moneyflow`，需2000积分)。`anpan_outflow_analysis.py` 用该口径做统计：
+
+```bash
+export TUSHARE_TOKEN=你的token
+python3 anpan_outflow_analysis.py              # 最近22个交易日(约1个月), 每日流出Top10
+python3 anpan_outflow_analysis.py 20260806 --days 22 --top 10 --push
+```
+- 每天取全市场主力净流出最大的前10只 → 匹配**次日**开盘/收盘 → 次日涨跌幅、是否阳线。
+- 输出总体阳线率、按【流出排名 / 流出金额分档 / 流出强度(流出÷成交额)分档 / 当日涨跌方向】
+  的分组阳线率，Spearman 相关，并自动总结**哪一组买到阳线概率最大**。
+- 完整报告(含每日Top10明细表)写入 `reports/anpan_YYYYMMDD.md`；`--push` 推送摘要。
